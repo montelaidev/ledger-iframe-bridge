@@ -1,5 +1,4 @@
 export const hexToAscii = (text) => {
-  return String.fromCharCode(
-    ...text.match(/.{1,2}/g).map((e) => Number.parseInt(e, 16)),
-  );
+  const bytes = text.match(/.{1,2}/gu) ?? [];
+  return String.fromCharCode(...bytes.map((byte) => Number.parseInt(byte, 16)));
 };

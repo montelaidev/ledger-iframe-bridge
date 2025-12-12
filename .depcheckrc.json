@@ -1,3 +1,11 @@
 {
-  "ignores": ["prettier-plugin-packagejson", "rimraf"]
+  "ignores": [
+    "prettier-plugin-packagejson",
+    "rimraf",
+    "@radix-ui/react-dropdown-menu",
+    "@types/react-dom",
+    "class-variance-authority",
+    "clsx",
+    "tailwind-merge"
+  ]
 }

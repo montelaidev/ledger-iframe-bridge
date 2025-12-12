@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 
 export default function Sidebar() {
   const { t } = useTranslation();
-  
+
   const menuItems = [
     { id: 'Home', label: t('menu.home'), icon: '🏠' },
     // { id: 'commands', label: 'Commands', icon: '📋' },
@@ -21,9 +21,7 @@ export default function Sidebar() {
   return (
     <div className="w-64 bg-[#1c1c1c] h-screen flex flex-col">
       <div className="p-4">
-        <h1 className="text-white text-xl font-bold mb-6">
-          {t('app.title')}
-        </h1>
+        <h1 className="text-white text-xl font-bold mb-6">{t('app.title')}</h1>
 
         <div className="space-y-6">
           <DeviceSession />

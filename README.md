@@ -34,6 +34,7 @@ This project supports multiple languages through [react-i18next](https://react.i
 ### Translation Workflow
 
 1. **Development**: Use the `t()` function from `react-i18next` for text that needs translation:
+
    ```jsx
    import { useTranslation } from 'react-i18next';
 
@@ -44,11 +45,13 @@ This project supports multiple languages through [react-i18next](https://react.i
    ```
 
 2. **Extract Messages**: Update translation source files:
+
    ```bash
    yarn i18n:extract
    ```
 
 3. **Upload to Crowdin**: Push source strings to Crowdin for translation:
+
    ```bash
    yarn i18n:upload
    ```

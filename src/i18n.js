@@ -1,9 +1,12 @@
-import i18n from 'i18next';
-import { initReactI18next } from 'react-i18next';
+import { createInstance } from 'i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 import Backend from 'i18next-http-backend';
+import { initReactI18next } from 'react-i18next';
 
-i18n
+const isDevelopment = Boolean(import.meta?.env?.DEV);
+const i18nInstance = createInstance();
+
+i18nInstance
   // Load translations from the /locales folder
   .use(Backend)
   // Detect user language
@@ -12,7 +15,7 @@ i18n
   .use(initReactI18next)
   // Initialize i18next
   .init({
-    debug: process.env.NODE_ENV === 'development',
+    debug: isDevelopment,
     fallbackLng: 'en',
     supportedLngs: ['en', 'es', 'fr', 'zh'],
     interpolation: {
@@ -35,4 +38,4 @@ i18n
     },
   });
 
-export default i18n;
+export default i18nInstance;

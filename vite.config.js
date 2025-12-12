@@ -1,13 +1,13 @@
-import { defineConfig } from 'vite';
 import legacy from '@vitejs/plugin-legacy';
-import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import react from '@vitejs/plugin-react';
-import tailwindcss from 'tailwindcss';
 import autoprefixer from 'autoprefixer';
+import tailwindcss from 'tailwindcss';
+import { defineConfig } from 'vite';
+import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 export default defineConfig({
   base: './',
-  plugins: [react(), [nodePolyfills()]],
+  plugins: [react(), legacy(), nodePolyfills()],
   css: {
     postcss: {
       plugins: [tailwindcss(), autoprefixer()],
@@ -26,10 +26,15 @@ export default defineConfig({
   },
 });
 
+/**
+ * Ensures third-party code is bundled into a dedicated vendor chunk.
+ *
+ * @param {string} id - Module identifier passed by Rollup.
+ * @returns {string | undefined} The chunk name when a module belongs to node_modules.
+ */
 function manualChunks(id) {
   if (id.includes('node_modules')) {
-    // all node_modules are in the vendor chunk
     return 'vendor';
   }
-  0;
+  return undefined;
 }

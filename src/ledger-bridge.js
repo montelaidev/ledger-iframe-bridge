@@ -1,14 +1,13 @@
 import { ContextModuleBuilder } from '@ledgerhq/context-module';
 import {
-  DeviceManagementKitBuilder,
   DeviceActionStatus,
+  DeviceManagementKitBuilder,
+  DeviceStatus,
   hexaStringToBuffer,
 } from '@ledgerhq/device-management-kit';
 import { SignerEthBuilder } from '@ledgerhq/device-signer-kit-ethereum';
-import { webHidTransportFactory } from '@ledgerhq/device-transport-kit-web-hid';
 import { webBleTransportFactory } from '@ledgerhq/device-transport-kit-web-ble';
-import { hexToAscii } from './utils/HexUtils';
-import { DeviceStatus } from '@ledgerhq/device-management-kit';
+import { webHidTransportFactory } from '@ledgerhq/device-transport-kit-web-hid';
 
 // Redux imports
 import { store } from './store';
@@ -24,6 +23,7 @@ import {
   setError,
   setTimeLeft,
 } from './store/ledgerSlice';
+import { hexToAscii } from './utils/HexUtils';
 
 export const WEBHID = 'WEB-HID';
 export const BLE = 'WEB-BLE';
@@ -33,18 +33,31 @@ export const LEDGER_BIP44_PATH = `m/44'/60'/0'/0`;
 export const LEDGER_LEGACY_PATH = `m/44'/60'/0'`;
 
 const timeoutDuration = 60000;
+const globalScope = globalThis;
+
 export default class LedgerBridge {
   sessionId;
+
   transportType = WEBHID;
+
   dmk;
+
   connectedDevice;
+
   ethSigner;
+
   deviceStatus;
+
   discoverySubscription;
+
   sessionStateSubscription;
+
   actionState = 'none';
+
   interval;
+
   closeTimeout;
+
   timeoutInterval;
 
   source;
@@ -70,8 +83,8 @@ export default class LedgerBridge {
   }
 
   addEventListeners() {
-    // Listen for window close events
-    window.addEventListener('beforeunload', async () => {
+    // Listen for tab close events
+    globalScope.addEventListener('beforeunload', async () => {
       console.log('Window is closing, cleaning up Ledger Bridge');
       // Clear any auto-close timeout
       this.#clearAutoCloseTimeout();
@@ -86,15 +99,18 @@ export default class LedgerBridge {
       await this.close();
     });
 
-    window.addEventListener(
+    globalScope.addEventListener(
       'message',
-      async (e) => {
-        if (e?.data && e.data.target === 'LEDGER-IFRAME') {
-          const { action, params, messageId, payload } = e.data;
+      async (messageEvent) => {
+        if (
+          messageEvent?.data &&
+          messageEvent.data.target === 'LEDGER-IFRAME'
+        ) {
+          const { action, params, messageId } = messageEvent.data;
           const replyAction = `${action}-reply`;
-          this.source = e.source;
+          this.source = messageEvent.source;
 
-          console.log('Message received:', e.data);
+          console.log('Message received:', messageEvent.data);
 
           // Adding this to preserve original code structure
 
@@ -108,11 +124,16 @@ export default class LedgerBridge {
                   payload: { online: true },
                   messageId,
                 },
-                e.source,
+                messageEvent.source,
               );
               break;
             case 'ledger-unlock':
-              this.unlock(replyAction, params.hdPath, messageId, e.source);
+              this.unlock(
+                replyAction,
+                params.hdPath,
+                messageId,
+                messageEvent.source,
+              );
               break;
             case 'ledger-sign-transaction':
               this.signTransaction(
@@ -120,7 +141,7 @@ export default class LedgerBridge {
                 params.hdPath,
                 params.tx,
                 messageId,
-                e.source,
+                messageEvent.source,
               );
               break;
             case 'ledger-sign-personal-message':
@@ -129,7 +150,7 @@ export default class LedgerBridge {
                 params.hdPath,
                 params.message,
                 messageId,
-                e.source,
+                messageEvent.source,
               );
               break;
             case 'ledger-bridge-close':
@@ -141,19 +162,19 @@ export default class LedgerBridge {
                   replyAction,
                   WEBHID,
                   messageId,
-                  e.source,
+                  messageEvent.source,
                 );
               } else {
                 this.updateTransportTypePreference(
                   replyAction,
                   BLE,
                   messageId,
-                  e.source,
+                  messageEvent.source,
                 );
               }
               break;
             case 'ledger-make-app':
-              this.attemptMakeApp(replyAction, messageId, e.source);
+              this.attemptMakeApp(replyAction, messageId, messageEvent.source);
               break;
             case 'ledger-sign-typed-data':
               this.signTypedData(
@@ -161,7 +182,7 @@ export default class LedgerBridge {
                 params.hdPath,
                 params.message,
                 messageId,
-                e.source,
+                messageEvent.source,
               );
               break;
             case 'heartbeat':
@@ -172,9 +193,20 @@ export default class LedgerBridge {
                   payload: { online: true },
                   messageId,
                 },
-                e.source,
+                messageEvent.source,
               );
               break;
+            default:
+              console.warn(`Unhandled ledger action: ${action}`);
+              this.sendMessageToExtension(
+                {
+                  action: replyAction,
+                  success: false,
+                  messageId,
+                  error: new Error(`Unsupported action: ${action}`),
+                },
+                messageEvent.source,
+              );
           }
         }
       },
@@ -182,10 +214,12 @@ export default class LedgerBridge {
     );
   }
 
-  sendMessageToExtension(msg, source) {
-    if (!source) return;
+  sendMessageToExtension(message, source) {
+    if (!source) {
+      return;
+    }
     this.subscribe = undefined;
-    source.postMessage(msg, '*');
+    source.postMessage(message, '*');
   }
 
   async attemptMakeApp(replyAction, messageId, source) {
@@ -213,22 +247,23 @@ export default class LedgerBridge {
     }
   }
 
-  makeApp(callback = () => {}) {
+  makeApp(callback = () => undefined) {
     console.log('makeApp');
     if (!this.transportType) {
       this.transportType = WEBHID;
       store.dispatch(setTransportType(this.transportType));
     }
 
-    if (!this.sessionId) {
-      try {
-        this.#setupInterval(callback);
-      } catch (error) {
-        console.error('Error:', error);
-        store.dispatch(setError(error.message));
-      }
-    } else {
+    if (this.sessionId) {
       callback();
+      return;
+    }
+
+    try {
+      this.#setupInterval(callback);
+    } catch (error) {
+      console.error('Error:', error);
+      store.dispatch(setError(error.message));
     }
   }
 
@@ -443,8 +478,10 @@ export default class LedgerBridge {
             this.source,
           );
 
-          // Close the window/page
-          window.close();
+          // Close the page
+          globalScope.close();
+          // Close the page
+          globalScope.close();
         } else {
           // Update time left
           store.dispatch(setTimeLeft(newTimeLeft));
@@ -466,8 +503,10 @@ export default class LedgerBridge {
           this.source,
         );
 
-        // Close the window/page
-        window.close();
+        // Close the page
+        globalScope.close();
+        // Close the page
+        globalScope.close();
       }, timeoutDuration);
     }
   }
@@ -528,7 +567,7 @@ export default class LedgerBridge {
     this.makeApp(() => {
       this.actionState = 'getAccount';
       store.dispatch(setActionState(this.actionState));
-      const { observable, cancel } = this.ethSigner.getAddress(
+      const { observable } = this.ethSigner.getAddress(
         hdPath.replace('m/', ''),
         {
           checkOnDevice: false,
@@ -552,7 +591,7 @@ export default class LedgerBridge {
             {
               action: replyAction,
               success: false,
-              payload: { error: error },
+              payload: { error },
               messageId,
             },
             source,
@@ -574,7 +613,7 @@ export default class LedgerBridge {
 
       const transaction = hexaStringToBuffer(tx);
 
-      const { observable, cancel } = this.ethSigner.signTransaction(
+      const { observable } = this.ethSigner.signTransaction(
         hdPath.replace('m/', ''),
         transaction,
         {
@@ -598,7 +637,7 @@ export default class LedgerBridge {
             {
               action: replyAction,
               success: false,
-              payload: { error: error },
+              payload: { error },
               messageId,
             },
             source,
@@ -626,7 +665,7 @@ export default class LedgerBridge {
       // }
 
       console.log(`clear text is ${clearText}`);
-      const { observable, cancel } = this.ethSigner.signMessage(
+      const { observable } = this.ethSigner.signMessage(
         hdPath.replace('m/', ''),
         clearText,
       );
@@ -647,7 +686,7 @@ export default class LedgerBridge {
             {
               action: replyAction,
               success: false,
-              payload: { error: error },
+              payload: { error },
               messageId,
             },
             source,
@@ -666,7 +705,7 @@ export default class LedgerBridge {
       this.actionState = 'sign Typed Data';
       store.dispatch(setActionState(this.actionState));
 
-      const { observable, cancel } = this.ethSigner.signTypedData(
+      const { observable } = this.ethSigner.signTypedData(
         hdPath.replace('m/', ''),
         message,
       );
@@ -687,7 +726,7 @@ export default class LedgerBridge {
             {
               action: replyAction,
               success: false,
-              payload: { error: error },
+              payload: { error },
               messageId,
             },
             source,
@@ -745,7 +784,7 @@ export default class LedgerBridge {
     if (deviceActionState.status === DeviceActionStatus.Completed) {
       this.actionState = 'none';
       store.dispatch(setActionState(this.actionState));
-      const output = deviceActionState.output;
+      const { output } = deviceActionState;
       console.log('output is', output);
       const result = output;
       if (
@@ -781,36 +820,36 @@ export default class LedgerBridge {
     }
   }
 
-  ledgerErrToMessage(err) {
-    const isU2FError = (err) => !!err && !!err.metaData;
-    const isStringError = (err) => typeof err === 'string';
-    const isErrorWithId = (err) =>
-      Object.prototype.hasOwnProperty.call(err, 'id') &&
-      Object.prototype.hasOwnProperty.call(err, 'message');
-    const isWrongAppError = (err) =>
-      String(err.message || err).includes('6804');
-    const isLedgerLockedError = (err) => err.message?.includes('OpenFailed');
+  ledgerErrToMessage(originalError) {
+    const isStringError = (error) => typeof error === 'string';
+    const isErrorWithId = (error) =>
+      Object.prototype.hasOwnProperty.call(error, 'id') &&
+      Object.prototype.hasOwnProperty.call(error, 'message');
+    const isWrongAppError = (error) =>
+      String(error.message || error).includes('6804');
+    const isLedgerLockedError = (error) =>
+      error.message?.includes('OpenFailed');
 
     // https://developers.yubico.com/U2F/Libraries/Client_error_codes.html
-    if (isWrongAppError(err)) {
+    if (isWrongAppError(originalError)) {
       return new Error('LEDGER_WRONG_APP');
     }
 
     if (
-      isLedgerLockedError(err) ||
-      (isStringError(err) && err.includes('6801'))
+      isLedgerLockedError(originalError) ||
+      (isStringError(originalError) && originalError.includes('6801'))
     ) {
       return new Error('LEDGER_LOCKED');
     }
 
-    if (isErrorWithId(err)) {
+    if (isErrorWithId(originalError)) {
       // Browser doesn't support U2F
-      if (err.message.includes('U2F not supported')) {
+      if (originalError.message.includes('U2F not supported')) {
         return new Error('U2F_NOT_SUPPORTED');
       }
     }
 
     // Other
-    return err;
+    return originalError;
   }
 }
