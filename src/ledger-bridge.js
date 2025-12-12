@@ -40,6 +40,8 @@ export default class LedgerBridge {
   connectedDevice;
   ethSigner;
   deviceStatus;
+  discoverySubscription;
+  sessionStateSubscription;
   actionState = 'none';
   interval;
   closeTimeout;
@@ -211,7 +213,7 @@ export default class LedgerBridge {
     }
   }
 
-  makeApp(callback) {
+  makeApp(callback = () => {}) {
     console.log('makeApp');
     if (!this.transportType) {
       this.transportType = WEBHID;
@@ -232,6 +234,8 @@ export default class LedgerBridge {
 
   createConnection() {
     console.log('createConnection');
+
+    this.#stopDiscovery();
 
     // Update Redux state to show connecting
     store.dispatch(
@@ -255,80 +259,87 @@ export default class LedgerBridge {
     const contextModule = new ContextModuleBuilder({
       originToken: 'origin-token', // TODO: replace with your origin token
     })
-      .addCalConfig(calConfig)
-      .addWeb3ChecksConfig(web3ChecksConfig)
+      .setCalConfig(calConfig)
+      .setWeb3ChecksConfig(web3ChecksConfig)
       .build();
 
-    this.dmk.startDiscovering({ transport: this.transportType }).subscribe({
-      next: (device) => {
-        console.log('Connecting to device:', device);
-        this.dmk
-          .connect({ device })
-          .then((sessionId) => {
-            const connectedDevice = this.dmk.getConnectedDevice({
-              sessionId,
-            });
+    this.discoverySubscription = this.dmk
+      .startDiscovering({ transport: this.transportType })
+      .subscribe({
+        next: (device) => {
+          // We only need the first device we successfully connect to
+          this.#stopDiscovery();
 
-            // Update local properties
-            this.connectedDevice = connectedDevice;
-            this.sessionId = sessionId;
+          console.log('Connecting to device:', device);
+          this.dmk
+            .connect({ device })
+            .then((sessionId) => {
+              const connectedDevice = this.dmk.getConnectedDevice({
+                sessionId,
+              });
 
-            // Update Redux state
-            store.dispatch(setConnectedDevice(connectedDevice));
-            store.dispatch(setSessionId(sessionId));
-            store.dispatch(
-              setConnectionStatus({
-                isConnected: true,
-                status: 'Connected',
-              }),
-            );
-            store.dispatch(setActionState('None'));
+              // Update local properties
+              this.connectedDevice = connectedDevice;
+              this.sessionId = sessionId;
 
-            // Clear any existing timeout since we're now connected
-            this.#clearAutoCloseTimeout();
+              // Update Redux state
+              store.dispatch(setConnectedDevice(connectedDevice));
+              store.dispatch(setSessionId(sessionId));
+              store.dispatch(
+                setConnectionStatus({
+                  isConnected: true,
+                  status: 'Connected',
+                }),
+              );
+              store.dispatch(setActionState('None'));
 
-            this.ethSigner = new SignerEthBuilder({
-              dmk: this.dmk,
-              sessionId,
+              // Clear any existing timeout since we're now connected
+              this.#clearAutoCloseTimeout();
+
+              this.ethSigner = new SignerEthBuilder({
+                dmk: this.dmk,
+                sessionId,
+              })
+                .withContextModule(contextModule)
+                .build();
+
+              // // setup subscription for device status
+              this.#setupDeviceStatusSubscription();
             })
-              .withContextModule(contextModule)
-              .build();
-
-            // // setup subscription for device status
-            this.#setupDeviceStatusSubscription();
-          })
-          .catch((error) => {
-            console.error('Connection error:', error);
-            store.dispatch(setError(error.message));
-            store.dispatch(
-              setConnectionStatus({
-                isConnected: false,
-                status: 'Error',
-              }),
-            );
-            // Set device status to NOT_CONNECTED and trigger timeout
-            store.dispatch(setDeviceStatus(DeviceStatus.NOT_CONNECTED));
-            this.#handleAutoCloseTimeout(DeviceStatus.NOT_CONNECTED);
-          });
-      },
-      error: (error) => {
-        console.error('Discovery error:', error);
-        store.dispatch(setError(error.message));
-        store.dispatch(
-          setConnectionStatus({
-            isConnected: false,
-            status: 'Error',
-          }),
-        );
-        // Set device status to NOT_CONNECTED and trigger timeout
-        store.dispatch(setDeviceStatus(DeviceStatus.NOT_CONNECTED));
-        this.#handleAutoCloseTimeout(DeviceStatus.NOT_CONNECTED);
-        throw error;
-      },
-      complete: () => {
-        console.log('Discovery complete');
-      },
-    });
+            .catch((error) => {
+              console.error('Connection error:', error);
+              store.dispatch(setError(error.message));
+              store.dispatch(
+                setConnectionStatus({
+                  isConnected: false,
+                  status: 'Error',
+                }),
+              );
+              // Set device status to NOT_CONNECTED and trigger timeout
+              store.dispatch(setDeviceStatus(DeviceStatus.NOT_CONNECTED));
+              this.#handleAutoCloseTimeout(DeviceStatus.NOT_CONNECTED);
+            });
+        },
+        error: (error) => {
+          this.#stopDiscovery();
+          console.error('Discovery error:', error);
+          store.dispatch(setError(error.message));
+          store.dispatch(
+            setConnectionStatus({
+              isConnected: false,
+              status: 'Error',
+            }),
+          );
+          // Set device status to NOT_CONNECTED and trigger timeout
+          store.dispatch(setDeviceStatus(DeviceStatus.NOT_CONNECTED));
+          this.#handleAutoCloseTimeout(DeviceStatus.NOT_CONNECTED);
+          throw error;
+        },
+        complete: () => {
+          this.#stopDiscovery();
+          console.log('Discovery complete');
+        },
+      });
   }
 
   #setupInterval(callback) {
@@ -352,23 +363,40 @@ export default class LedgerBridge {
   }
 
   #setupDeviceStatusSubscription() {
-    this.dmk.getDeviceSessionState({ sessionId: this.sessionId }).subscribe({
-      next: (state) => {
-        this.deviceStatus = state.deviceStatus;
-        // Update Redux state with device status
-        store.dispatch(setDeviceStatus(state.deviceStatus));
+    this.#clearSessionStateSubscription();
+    this.sessionStateSubscription = this.dmk
+      .getDeviceSessionState({ sessionId: this.sessionId })
+      .subscribe({
+        next: (state) => {
+          this.deviceStatus = state.deviceStatus;
+          // Update Redux state with device status
+          store.dispatch(setDeviceStatus(state.deviceStatus));
 
-        // Handle auto-close timeout for specific device states
-        this.#handleAutoCloseTimeout(state.deviceStatus);
-      },
-      error: (error) => {
-        console.error('Device status error:', error);
-        store.dispatch(setError(error.message));
-      },
-      complete: () => {
-        console.log('Device session state subscription completed');
-      },
-    });
+          // Handle auto-close timeout for specific device states
+          this.#handleAutoCloseTimeout(state.deviceStatus);
+        },
+        error: (error) => {
+          console.error('Device status error:', error);
+          store.dispatch(setError(error.message));
+        },
+        complete: () => {
+          console.log('Device session state subscription completed');
+        },
+      });
+  }
+
+  #stopDiscovery() {
+    if (this.discoverySubscription) {
+      this.discoverySubscription.unsubscribe();
+      this.discoverySubscription = null;
+    }
+  }
+
+  #clearSessionStateSubscription() {
+    if (this.sessionStateSubscription) {
+      this.sessionStateSubscription.unsubscribe();
+      this.sessionStateSubscription = null;
+    }
   }
 
   #handleAutoCloseTimeout(deviceStatus) {
@@ -675,6 +703,8 @@ export default class LedgerBridge {
   async disconnect() {
     // Clear any auto-close timeout
     this.#clearAutoCloseTimeout();
+    this.#stopDiscovery();
+    this.#clearSessionStateSubscription();
 
     if (this.dmk && this.sessionId) {
       await this.dmk.disconnect({ sessionId: this.sessionId });
