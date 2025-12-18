@@ -8,7 +8,6 @@ on:
         required: true
         type: string
 
-
 # Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
 # However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
 concurrency:
@@ -34,6 +33,6 @@ jobs:
       - name: Deploy to `${{ inputs.destination_dir }}` directory of `gh-pages` branch
         uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e
         with:
-          personal_token: ${{ secrets.GH_PAGES_DEPLOY_TOKEN }}
+          personal_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
           destination_dir: ${{ inputs.destination_dir }}
