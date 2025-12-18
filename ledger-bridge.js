@@ -102,6 +102,9 @@ export default class LedgerBridge {
             case 'ledger-make-app':
               this.attemptMakeApp(replyAction, messageId);
               break;
+            case 'ledger-get-app-and-name':
+              this.getAppAndName(replyAction, messageId);
+              break;
             case 'ledger-sign-typed-data':
               this.signTypedData(
                 replyAction,
@@ -190,6 +193,25 @@ export default class LedgerBridge {
     } catch (e) {
       console.log('LEDGER:::CREATE APP ERROR', e);
       throw e;
+    }
+  }
+
+  async getAppAndName(replyAction, messageId) {
+    try {
+      const res = await this.app.getAppNameAndVersion();
+      console.log('LEDGER:::GET APP AND NAME', res);
+      this.sendMessageToExtension({
+        action: replyAction,
+        success: true,
+        payload: res,
+      });
+    } catch (error) {
+      this.sendMessageToExtension({
+        action: replyAction,
+        success: false,
+        payload: { error: serializeError(error) },
+        messageId,
+      });
     }
   }
 
