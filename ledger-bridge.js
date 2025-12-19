@@ -241,8 +241,6 @@ export default class LedgerBridge {
 
       const r = await this.transport.send(0xb0, 0x01, 0x00, 0x00);
       let i = 0;
-      const format = r[i++];
-      invariant(format === 1, 'getAppAndVersion: format not supported');
       const nameLength = r[i++];
       const name = r.slice(i, (i += nameLength)).toString('ascii');
       const versionLength = r[i++];
