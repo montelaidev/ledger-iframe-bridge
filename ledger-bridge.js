@@ -33,7 +33,7 @@ const serializeError = (error) => {
 export default class LedgerBridge {
   constructor() {
     this.addEventListeners();
-    this.transportType = 'u2f';
+    this.transportType = 'webhid';
   }
 
   addEventListeners() {
@@ -80,7 +80,7 @@ export default class LedgerBridge {
                 params.transportType === 'ledgerLive' ||
                 params.useLedgerLive
               ) {
-                this.updateTransportTypePreference(
+                await this.updateTransportTypePreference(
                   replyAction,
                   'ledgerLive',
                   messageId,
@@ -240,9 +240,9 @@ export default class LedgerBridge {
     }
   }
 
-  updateTransportTypePreference(replyAction, transportType, messageId) {
+  async updateTransportTypePreference(replyAction, transportType, messageId) {
     this.transportType = transportType;
-    this.cleanUp();
+    await this.cleanUp();
     this.sendMessageToExtension({
       action: replyAction,
       success: true,
@@ -284,7 +284,7 @@ export default class LedgerBridge {
       });
     } finally {
       if (this.transportType !== 'ledgerLive') {
-        this.cleanUp();
+        await this.cleanUp();
       }
     }
   }
