@@ -102,7 +102,7 @@ export default class LedgerBridge {
             case 'ledger-make-app':
               this.attemptMakeApp(replyAction, messageId);
               break;
-            case 'ledger-get-app-and-name':
+            case 'ledger-get-app-name-and-version':
               this.getAppAndName(replyAction, messageId);
               break;
             case 'ledger-sign-typed-data':
