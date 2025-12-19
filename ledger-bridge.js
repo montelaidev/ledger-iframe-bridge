@@ -198,6 +198,7 @@ export default class LedgerBridge {
 
   async getAppAndName(replyAction, messageId) {
     try {
+      await this.makeApp();
       const res = await this.app.getAppNameAndVersion();
       console.log('LEDGER:::GET APP AND NAME', res);
       this.sendMessageToExtension({
