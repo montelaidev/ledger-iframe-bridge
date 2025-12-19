@@ -199,26 +199,42 @@ export default class LedgerBridge {
   async getAppAndName(replyAction, messageId) {
     try {
       await this.makeApp();
-      const response = await this.transport.send(0xb0, 0x01, 0x00, 0x00);
-      if (response[0] !== 1) {
-        throw new Error('Incorrect format return from getAppNameAndVersion.');
-      }
+      // const response = await this.transport.send(0xb0, 0x01, 0x00, 0x00);
+      // if (response[0] !== 1) {
+      //   throw new Error('Incorrect format return from getAppNameAndVersion.');
+      // }
 
-      let i = 1;
-      const nameLength = response[i] ?? 0;
-      i += 1;
+      // let i = 1;
+      // const nameLength = response[i] ?? 0;
+      // i += 1;
 
-      const appName = response
-        .slice(i, (i += nameLength))
-        .toString(this.transportEncoding);
+      // const appName = response
+      //   .slice(i, (i += nameLength))
+      //   .toString(this.transportEncoding);
 
-      const versionLength = response[i] ?? 0;
-      i += 1;
+      // const versionLength = response[i] ?? 0;
+      // i += 1;
 
-      const version = response
-        .slice(i, (i += versionLength))
-        .toString(this.transportEncoding);
+      // const version = response
+      //   .slice(i, (i += versionLength))
+      //   .toString(this.transportEncoding);
 
+      // const res = {
+      //   appName,
+      //   version,
+      // };
+      console.log('LEDGER:::GET APP AND NAME', this.transport);
+      const response = await transport.send(
+        0xe0, // CLA
+        0x01, // INS (GET_APP_NAME)
+        0x00, // P1
+        0x00, // P2
+      );
+
+      // Parse response (last 2 bytes are status)
+      const buffer = response.slice(0, -2);
+      const appName = buffer.toString('ascii').replace(/\x00/g, '');
+      const version = buffer.slice(buffer.length - 2).toString('hex');
       const res = {
         appName,
         version,
