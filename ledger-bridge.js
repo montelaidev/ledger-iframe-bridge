@@ -239,7 +239,7 @@ export default class LedgerBridge {
       //   version,
       // };
 
-      const r = await transport.send(0xb0, 0x01, 0x00, 0x00);
+      const r = await this.transport.send(0xb0, 0x01, 0x00, 0x00);
       let i = 0;
       const format = r[i++];
       invariant(format === 1, 'getAppAndVersion: format not supported');
