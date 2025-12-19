@@ -223,21 +223,33 @@ export default class LedgerBridge {
       //   appName,
       //   version,
       // };
-      const response = await this.transport.send(
-        0xe0, // CLA
-        0x01, // INS (GET_APP_NAME)
-        0x00, // P1
-        0x00, // P2
-      );
+      // const response = await this.transport.send(
+      //   0xe0, // CLA
+      //   0x01, // INS (GET_APP_NAME)
+      //   0x00, // P1
+      //   0x00, // P2
+      // );
 
-      // Parse response (last 2 bytes are status)
-      const buffer = response.slice(0, -2);
-      const appName = buffer.toString('ascii').replace(/\x00/g, '');
-      const version = buffer.slice(buffer.length - 2).toString('hex');
-      const res = {
-        appName,
-        version,
-      };
+      // // Parse response (last 2 bytes are status)
+      // const buffer = response.slice(0, -2);
+      // const appName = buffer.toString('ascii').replace(/\x00/g, '');
+      // const version = buffer.slice(buffer.length - 2).toString('hex');
+      // const res = {
+      //   appName,
+      //   version,
+      // };
+
+      const r = await transport.send(0xb0, 0x01, 0x00, 0x00);
+      let i = 0;
+      const format = r[i++];
+      invariant(format === 1, 'getAppAndVersion: format not supported');
+      const nameLength = r[i++];
+      const name = r.slice(i, (i += nameLength)).toString('ascii');
+      const versionLength = r[i++];
+      const version = r.slice(i, (i += versionLength)).toString('ascii');
+      const flagLength = r[i++];
+      const flags = r.slice(i, (i += flagLength));
+      const res = { name, version, flags };
       console.log('LEDGER:::GET APP AND NAME', res);
       this.sendMessageToExtension({
         action: replyAction,
