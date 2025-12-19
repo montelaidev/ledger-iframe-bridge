@@ -229,6 +229,7 @@ export default class LedgerBridge {
         action: replyAction,
         success: true,
         payload: res,
+        messageId,
       });
     } catch (error) {
       this.sendMessageToExtension({
