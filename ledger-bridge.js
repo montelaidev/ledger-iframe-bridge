@@ -224,7 +224,7 @@ export default class LedgerBridge {
       //   version,
       // };
       console.log('LEDGER:::GET APP AND NAME', this.transport);
-      const response = await transport.send(
+      const response = await this.transport.send(
         0xe0, // CLA
         0x01, // INS (GET_APP_NAME)
         0x00, // P1
