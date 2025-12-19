@@ -199,7 +199,30 @@ export default class LedgerBridge {
   async getAppAndName(replyAction, messageId) {
     try {
       await this.makeApp();
-      const res = await this.app.getAppConfiguration();
+      const response = await this.transport.send(0xb0, 0x01, 0x00, 0x00);
+      if (response[0] !== 1) {
+        throw new Error('Incorrect format return from getAppNameAndVersion.');
+      }
+
+      let i = 1;
+      const nameLength = response[i] ?? 0;
+      i += 1;
+
+      const appName = response
+        .slice(i, (i += nameLength))
+        .toString(this.transportEncoding);
+
+      const versionLength = response[i] ?? 0;
+      i += 1;
+
+      const version = response
+        .slice(i, (i += versionLength))
+        .toString(this.transportEncoding);
+
+      const res = {
+        appName,
+        version,
+      };
       console.log('LEDGER:::GET APP AND NAME', res);
       this.sendMessageToExtension({
         action: replyAction,
