@@ -62,10 +62,16 @@ export default class LedgerBridge {
   async abortCurrentOperation() {
     if (this.abortController) {
       this.abortController.abort();
-      this.abortController = null;
     }
-    this.currentOperation = null;
-    await this.cleanUp();
+
+    // Force close the transport to interrupt any blocked operations
+    // Don't await - just trigger the close and let it complete in the background
+    // Don't null out the references here - let the signing operation's finally block handle cleanup
+    if (this.transport) {
+      this.transport.close().catch((err) => {
+        console.log('Transport close error during abort:', err);
+      });
+    }
   }
 
   addEventListeners() {
@@ -156,14 +162,18 @@ export default class LedgerBridge {
   }
 
   async handleAbort(replyAction, messageId) {
+    console.log('LEDGER:::HANDLE ABORT');
     try {
+      console.log('LEDGER:::HANDLE ABORT TRY');
       await this.abortCurrentOperation();
       this.sendMessageToExtension({
         action: replyAction,
         success: true,
         messageId,
       });
+      console.log('LEDGER:::HANDLE ABORT SENT');
     } catch (error) {
+      console.log('LEDGER:::HANDLE ABORT ERROR', error);
       this.sendMessageToExtension({
         action: replyAction,
         success: false,
@@ -318,7 +328,12 @@ export default class LedgerBridge {
   async cleanUp(replyAction, messageId) {
     this.app = null;
     if (this.transport) {
-      await this.transport.close();
+      try {
+        await this.transport.close();
+      } catch (err) {
+        // Transport may already be closed or in an error state
+        console.log('Transport close error during cleanup:', err);
+      }
       this.transport = null;
     }
     if (replyAction) {
@@ -384,7 +399,7 @@ export default class LedgerBridge {
       this.currentOperation = null;
       this.abortController = null;
       if (this.transportType !== 'ledgerLive') {
-        this.cleanUp();
+        await this.cleanUp();
       }
     }
   }
@@ -416,7 +431,7 @@ export default class LedgerBridge {
       this.currentOperation = null;
       this.abortController = null;
       if (this.transportType !== 'ledgerLive') {
-        this.cleanUp();
+        await this.cleanUp();
       }
     }
   }
@@ -449,7 +464,7 @@ export default class LedgerBridge {
     } finally {
       this.currentOperation = null;
       this.abortController = null;
-      this.cleanUp();
+      await this.cleanUp();
     }
   }
 
