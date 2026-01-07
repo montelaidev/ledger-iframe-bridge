@@ -34,6 +34,38 @@ export default class LedgerBridge {
   constructor() {
     this.addEventListeners();
     this.transportType = 'webhid';
+    this.abortController = null;
+    this.currentOperation = null;
+  }
+
+  createAbortController() {
+    // Cancel any existing operation
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+    this.abortController = new AbortController();
+    return this.abortController.signal;
+  }
+
+  checkAborted() {
+    // Only throw if we're in a signing operation
+    const isSigningOperation = [
+      'signTransaction',
+      'signPersonalMessage',
+      'signTypedData',
+    ].includes(this.currentOperation);
+    if (isSigningOperation && this.abortController?.signal.aborted) {
+      throw new Error('Operation aborted by user');
+    }
+  }
+
+  async abortCurrentOperation() {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
+    this.currentOperation = null;
+    await this.cleanUp();
   }
 
   addEventListeners() {
@@ -113,11 +145,32 @@ export default class LedgerBridge {
                 messageId,
               );
               break;
+            case 'ledger-abort-operation':
+              this.handleAbort(replyAction, messageId);
+              break;
           }
         }
       },
       false,
     );
+  }
+
+  async handleAbort(replyAction, messageId) {
+    try {
+      await this.abortCurrentOperation();
+      this.sendMessageToExtension({
+        action: replyAction,
+        success: true,
+        messageId,
+      });
+    } catch (error) {
+      this.sendMessageToExtension({
+        action: replyAction,
+        success: false,
+        payload: { error: serializeError(error) },
+        messageId,
+      });
+    }
   }
 
   sendMessageToExtension(msg) {
@@ -130,8 +183,11 @@ export default class LedgerBridge {
 
   checkTransportLoop(i) {
     const iterator = i || 0;
+    this.checkAborted(); // Check if operation was aborted
     return WebSocketTransport.check(BRIDGE_URL).catch(async () => {
+      this.checkAborted(); // Check before delay
       await this.delay(TRANSPORT_CHECK_DELAY);
+      this.checkAborted(); // Check after delay
       if (iterator < TRANSPORT_CHECK_LIMIT) {
         return this.checkTransportLoop(iterator + 1);
       } else {
@@ -162,17 +218,21 @@ export default class LedgerBridge {
 
   async makeApp(config = {}) {
     try {
+      this.checkAborted(); // Check at start
       if (this.transportType === 'ledgerLive') {
         let reestablish = false;
         try {
           await WebSocketTransport.check(BRIDGE_URL);
         } catch (_err) {
+          this.checkAborted(); // Check before opening window
           window.open('ledgerlive://bridge?appName=Ethereum');
           await this.checkTransportLoop();
           reestablish = true;
         }
         if (!this.app || reestablish) {
+          this.checkAborted(); // Check before creating transport
           this.transport = await WebSocketTransport.open(BRIDGE_URL);
+          this.checkAborted(); // Check after transport creation
           this.app = new LedgerEth(this.transport);
         }
       } else if (this.transportType === 'webhid') {
@@ -182,12 +242,16 @@ export default class LedgerBridge {
         if (this.app && nameOfDeviceType === 'HIDDevice' && deviceIsOpen) {
           return;
         }
+        this.checkAborted(); // Check before creating transport
         this.transport = config.openOnly
           ? await TransportWebHID.openConnected()
           : await TransportWebHID.create();
+        this.checkAborted(); // Check after transport creation
         this.app = new LedgerEth(this.transport);
       } else {
+        this.checkAborted(); // Check before creating transport
         this.transport = await TransportWebUSB.create();
+        this.checkAborted(); // Check after transport creation
         this.app = new LedgerEth(this.transport);
       }
     } catch (e) {
@@ -291,13 +355,17 @@ export default class LedgerBridge {
   }
 
   async signTransaction(replyAction, hdPath, tx, messageId) {
+    this.currentOperation = 'signTransaction';
+    this.createAbortController();
     try {
       await this.makeApp();
+      this.checkAborted();
       const res = await this.app.clearSignTransaction(hdPath, tx, {
         nft: true,
         externalPlugins: true,
         erc20: true,
       });
+      this.checkAborted();
       this.sendMessageToExtension({
         action: replyAction,
         success: true,
@@ -305,13 +373,16 @@ export default class LedgerBridge {
         messageId,
       });
     } catch (error) {
+      const isAborted = error.message === 'Operation aborted by user';
       this.sendMessageToExtension({
         action: replyAction,
         success: false,
-        payload: { error: serializeError(error) },
+        payload: { error: serializeError(error), aborted: isAborted },
         messageId,
       });
     } finally {
+      this.currentOperation = null;
+      this.abortController = null;
       if (this.transportType !== 'ledgerLive') {
         this.cleanUp();
       }
@@ -319,10 +390,14 @@ export default class LedgerBridge {
   }
 
   async signPersonalMessage(replyAction, hdPath, message, messageId) {
+    this.currentOperation = 'signPersonalMessage';
+    this.createAbortController();
     try {
       await this.makeApp();
+      this.checkAborted();
 
       const res = await this.app.signPersonalMessage(hdPath, message);
+      this.checkAborted();
       this.sendMessageToExtension({
         action: replyAction,
         success: true,
@@ -330,13 +405,16 @@ export default class LedgerBridge {
         messageId,
       });
     } catch (error) {
+      const isAborted = error.message === 'Operation aborted by user';
       this.sendMessageToExtension({
         action: replyAction,
         success: false,
-        payload: { error: serializeError(error) },
+        payload: { error: serializeError(error), aborted: isAborted },
         messageId,
       });
     } finally {
+      this.currentOperation = null;
+      this.abortController = null;
       if (this.transportType !== 'ledgerLive') {
         this.cleanUp();
       }
@@ -344,11 +422,15 @@ export default class LedgerBridge {
   }
 
   async signTypedData(replyAction, hdPath, message, messageId) {
+    this.currentOperation = 'signTypedData';
+    this.createAbortController();
     try {
       await this.makeApp();
+      this.checkAborted();
 
       // Try the primary method first
       let res = await this.attemptSignEIP712Message(hdPath, message);
+      this.checkAborted();
 
       this.sendMessageToExtension({
         action: replyAction,
@@ -357,22 +439,32 @@ export default class LedgerBridge {
         messageId,
       });
     } catch (error) {
+      const isAborted = error.message === 'Operation aborted by user';
       this.sendMessageToExtension({
         action: replyAction,
         success: false,
-        payload: { error: serializeError(error) },
+        payload: { error: serializeError(error), aborted: isAborted },
         messageId,
       });
     } finally {
+      this.currentOperation = null;
+      this.abortController = null;
       this.cleanUp();
     }
   }
 
   async attemptSignEIP712Message(hdPath, message) {
     try {
+      this.checkAborted();
       // Try the primary signing method
       return await this.app.signEIP712Message(hdPath, message);
     } catch (signError) {
+      // Re-throw if it's an abort error
+      if (signError.message === 'Operation aborted by user') {
+        throw signError;
+      }
+
+      this.checkAborted();
       // Fallback to signEIP712HashedMessage if signEIP712Message fails (e.g., for Nano S)
       // Extract hashStructMessageHex and domainSeparatorHex from the message object
       const domainSeparatorHex = TypedDataUtils.hashStruct(
@@ -389,6 +481,7 @@ export default class LedgerBridge {
         SignTypedDataVersion.V4,
       ).toString('hex');
 
+      this.checkAborted();
       // Try the fallback signing method
       return await this.app.signEIP712HashedMessage(
         hdPath,
